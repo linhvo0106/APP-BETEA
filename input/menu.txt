@@ -1,0 +1,6 @@
+MENU BETEA
+1.Trà sữa truyền thống
+2.Trà sữa hoa lài
+3.Trà sữa matcha
+4.Trà sữa dâu
+5.Trà sữa đại hồng bào
