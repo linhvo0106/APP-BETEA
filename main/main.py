@@ -4,7 +4,7 @@ import time
 import threading
 import pytz
 import logging
-from datetime import datetime
+from datetime import datetime, time as datetime_time
 
 # Hằng số chuyển đổi: 100ml tương ứng 3 giây
 TIME_PER_100ML = 3
@@ -12,7 +12,7 @@ TIME_PER_100ML = 3
 TIME_PER_100ML_special = 5
 
 # Cấu hình chân GPIO cho module relay
-RELAY_PINS = [14, 18, 16, 20, 21]  # Chân GPIO kết nối với 5 relay
+RELAY_PINS = [14, 18, 16, 20, 21, 23, 24, 25, 8, 7]  # Chân GPIO kết nối với 5 relay
 CONFIG_FILE = "app_betea/input/config.txt"
 LOG_FILE = "app_betea/output/history.log"
 VIETNAM_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
@@ -41,39 +41,45 @@ def on_connect(client, userdata, flags, rc):
     else:
         print(f"Kết nối thất bại với mã lỗi {rc}")
 
-# Sửa hàm on_message để xử lý ký tự '#'
+# Sửa hàm on_message để xử lý format mới
 def on_message(client, userdata, message):
     msg = message.payload.decode("utf-8")
     print(f"Nhận được tin nhắn từ App BeTea: {msg}")
     logging.info(f"Đã nhận tin nhắn MQTT: {msg}")
     logging.info("Start!")
-
     
     try:
-        # Phân tích chuỗi nhận được
-        values = msg.split("||")
-        if len(values) >= 5:
-            # Lưu tin nhắn vào file để lưu lịch sử
-            with open(CONFIG_FILE, 'w') as file:
-                file.write(msg)
+        # Kiểm tra nếu là lệnh đặc biệt
+        if msg == "#|#|#|#|#":
+            # Chạy tất cả các bơm liên tục
+            for i in range(len(RELAY_PINS)):
+                run_pump(i, -1)  # -1 là chế độ chạy liên tục
+            logging.info("Tất cả các bơm đang chạy liên tục")
+            return
             
-            # Chuyển đổi giá trị, xử lý ký tự '#' thành -1
-            states = []
-            for v in values:
-                v = v.strip()
-                if v == '#':
-                    states.append(-1)  # -1 đại diện cho chạy liên tục
-                else:
-                    states.append(int(v))
-                    
-            # print(f"Kích hoạt hệ thống bơm với thông số: {states}")
+        if msg == "0|0|0|0|0":
+            # Dừng tất cả các bơm
+            for i in range(len(RELAY_PINS)):
+                run_pump(i, 0)  # 0 là lệnh dừng
+            logging.info("Tất cả các bơm đã dừng")
+            return
+
+        # Xử lý các lệnh thông thường
+        pump_commands = msg.split("|")
+        for command in pump_commands:
+            if not command:
+                continue
+                
+            pump_num, volume = map(int, command.split("-"))
+            pump_index = pump_num - 1
             
-            # Chạy tuần tự các bơm
-            for i, state in enumerate(states):
-                run_pump(i, state)           
-            # Thêm dòng phân cách sau khi hoàn thành phiên bơm
-            logging.info("Done")
-            logging.info("-" * 50)
+            if 0 <= pump_index < len(RELAY_PINS):
+                run_pump(pump_index, volume)
+            else:
+                logging.error(f"Số bơm không hợp lệ: {pump_num}")
+        
+        logging.info("Done")
+        logging.info("-" * 50)
                 
     except Exception as e:
         logging.error(f"Lỗi xử lý tin nhắn MQTT: {e}")
@@ -98,10 +104,44 @@ def run_pump(index, state):
         logging.error(f"Lỗi khi điều khiển bơm {index + 1}: {str(e)}")
         GPIO.output(RELAY_PINS[index], GPIO.LOW)  # Đảm bảo tắt bơm khi có lỗi
 
+def clear_log():
+    """Xóa toàn bộ nội dung file history.log"""
+    try:
+        open(LOG_FILE, 'w').close()
+        print("Đã xóa lịch sử log thành công")
+        logging.info("Đã xóa log tự động")
+    except Exception as e:
+        print(f"Lỗi khi xóa file log: {e}")
+        logging.error(f"Lỗi khi xóa log: {e}")
+
+def auto_clear_log():
+    """Tự động xóa log vào 00:00 mỗi ngày"""
+    while True:
+        now = datetime.now(VIETNAM_TZ)
+        # Đặt thời gian xóa log là 00:00
+        next_run = datetime.combine(now.date(), datetime_time(0, 0))
+        next_run = VIETNAM_TZ.localize(next_run)
+        
+        if now >= next_run:
+            # Nếu đã qua 00:00, đợi đến ngày mai
+            next_run = next_run.replace(day=next_run.day + 1)
+        
+        # Tính thời gian chờ đến lần xóa tiếp theo
+        sleep_seconds = (next_run - now).total_seconds()
+        time.sleep(sleep_seconds)
+        
+        # Xóa log
+        clear_log()
+
 def main():
     try:
         print("Bắt đầu chương trình điều khiển máy bơm...")
         logging.info("Khởi động hệ thống")
+        
+        # Thêm thread xóa log tự động
+        auto_clear_thread = threading.Thread(target=auto_clear_log)
+        auto_clear_thread.daemon = True
+        auto_clear_thread.start()
         
         # Tạo MQTT client
         client = mqtt.Client()
