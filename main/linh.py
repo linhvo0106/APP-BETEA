@@ -7,12 +7,12 @@ import logging
 from datetime import datetime, time as datetime_time
 
 # Hằng số chuyển đổi: 100ml tương ứng 3 giây
-TIME_PER_100ML = 3
+TIME_PER_100ML = 2.7
 # Hằng số chuyển đổi: 100ml tương ứng 5 giây
-TIME_PER_100ML_special = 5
+TIME_PER_100ML_special = 3
 
 # Cấu hình chân GPIO cho module relay
-RELAY_PINS = [14, 18, 16, 20, 21, 23, 24, 25, 8, 7]  # Chân GPIO kết nối với 5 relay
+RELAY_PINS = [15, 18, 16, 20, 21, 23, 24, 25, 8, 7]  # Chân GPIO kết nối với 5 relay
 CONFIG_FILE = "app_betea/input/config.txt"
 LOG_FILE = "app_betea/output/history.log"
 VIETNAM_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
@@ -41,52 +41,8 @@ def on_connect(client, userdata, flags, rc):
     else:
         print(f"Kết nối thất bại với mã lỗi {rc}")
 
-# Sửa hàm on_message để xử lý format mới
-def on_message(client, userdata, message):
-    msg = message.payload.decode("utf-8")
-    print(f"Nhận được tin nhắn từ App BeTea: {msg}")
-    logging.info(f"Đã nhận tin nhắn MQTT: {msg}")
-    logging.info("Start!")
-    
-    try:
-        # Kiểm tra nếu là lệnh đặc biệt
-        if msg == "#|#|#|#|#":
-            # Chạy tất cả các bơm liên tục
-            for i in range(len(RELAY_PINS)):
-                run_pump(i, -1)  # -1 là chế độ chạy liên tục
-            logging.info("Tất cả các bơm đang chạy liên tục")
-            return
-            
-        if msg == "0|0|0|0|0":
-            # Dừng tất cả các bơm
-            for i in range(len(RELAY_PINS)):
-                run_pump(i, 0)  # 0 là lệnh dừng
-            logging.info("Tất cả các bơm đã dừng")
-            return
-
-        # Xử lý các lệnh thông thường
-        pump_commands = msg.split("|")
-        for command in pump_commands:
-            if not command:
-                continue
-                
-            pump_num, volume = map(int, command.split("-"))
-            pump_index = pump_num - 1
-            
-            if 0 <= pump_index < len(RELAY_PINS):
-                run_pump(pump_index, volume)
-            else:
-                logging.error(f"Số bơm không hợp lệ: {pump_num}")
-        
-        logging.info("Done")
-        logging.info("-" * 50)
-                
-    except Exception as e:
-        logging.error(f"Lỗi xử lý tin nhắn MQTT: {e}")
-        print(f"Lỗi xử lý tin nhắn: {e}")
-
-def run_pump(index, state):
-    """Điều khiển máy bơm theo trạng thái."""
+# Hàm chạy máy bơm trong một thread riêng biệt
+def pump_thread(index, state):
     try:
         if state == -1:  # Chạy liên tục
             GPIO.output(RELAY_PINS[index], GPIO.HIGH)
@@ -100,9 +56,73 @@ def run_pump(index, state):
             logging.info(f"Bơm {index + 1} hoạt động {run_time:.2f} giây (Lưu lượng: {state}ml)")
             time.sleep(run_time)
             GPIO.output(RELAY_PINS[index], GPIO.LOW)
+            # logging.info(f"Bơm {index + 1} hoàn thành")
     except Exception as e:
         logging.error(f"Lỗi khi điều khiển bơm {index + 1}: {str(e)}")
         GPIO.output(RELAY_PINS[index], GPIO.LOW)  # Đảm bảo tắt bơm khi có lỗi
+
+# Điều khiển bơm bằng cách tạo thread riêng
+def run_pump(index, state):
+    """Khởi động máy bơm trong một thread riêng"""
+    pump_th = threading.Thread(target=pump_thread, args=(index, state))
+    pump_th.daemon = True
+    pump_th.start()
+    return pump_th
+
+# Sửa hàm on_message để xử lý các bơm chạy đồng thời
+def on_message(client, userdata, message):
+    msg = message.payload.decode("utf-8")
+    print(f"Nhận được tin nhắn từ App BeTea: {msg}")
+    logging.info(f"Đã nhận tin nhắn MQTT: {msg}")
+    logging.info("Start!")
+    
+    try:
+        # Kiểm tra nếu là lệnh đặc biệt
+        if msg == "#|#|#|#|#":
+            # Chạy tất cả các bơm liên tục
+            threads = []
+            for i in range(len(RELAY_PINS)):
+                threads.append(run_pump(i, -1))  # -1 là chế độ chạy liên tục
+            logging.info("Tất cả các bơm đang chạy liên tục")
+            return
+            
+        if msg == "0|0|0|0|0":
+            # Dừng tất cả các bơm
+            threads = []
+            for i in range(len(RELAY_PINS)):
+                threads.append(run_pump(i, 0))  # 0 là lệnh dừng
+            logging.info("Tất cả các bơm đã dừng")
+            return
+
+        # Xử lý các lệnh thông thường - chạy đồng thời
+        pump_commands = msg.split("|")
+        active_threads = []
+        
+        for command in pump_commands:
+            if not command:
+                continue
+                
+            pump_num, volume = map(int, command.split("-"))
+            pump_index = pump_num - 1
+            
+            if 0 <= pump_index < len(RELAY_PINS):
+                thread = run_pump(pump_index, volume)
+                active_threads.append(thread)
+            else:
+                logging.error(f"Số bơm không hợp lệ: {pump_num}")
+        
+        # Chờ tất cả các bơm hoàn thành (không bắt buộc)
+        # Nếu muốn báo cáo khi tất cả các bơm hoàn thành:
+        for thread in active_threads:
+            thread.join()
+        
+        # logging.info("Tất cả các bơm đã hoàn thành xong")
+        logging.info("Done")
+        logging.info("-" * 50)
+                
+    except Exception as e:
+        logging.error(f"Lỗi xử lý tin nhắn MQTT: {e}")
+        print(f"Lỗi xử lý tin nhắn: {e}")
 
 def clear_log():
     """Xóa toàn bộ nội dung file history.log"""
