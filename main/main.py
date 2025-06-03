@@ -1,9 +1,14 @@
-import RPi.GPIO as GPIO
+try:
+    import RPi.GPIO as GPIO
+except ModuleNotFoundError:
+    print("⚠️ RPi.GPIO not available, using fake-rpi.")
+    from fake_rpi.RPi import GPIO
 import paho.mqtt.client as mqtt
 import time
 import threading
 import pytz
 import logging
+import os
 from datetime import datetime, time as datetime_time
 
 # Hằng số chuyển đổi: 100ml tương ứng 3 giây
@@ -16,6 +21,9 @@ RELAY_PINS = [14, 18, 16, 20, 21, 23, 24, 25, 8, 7]  # Chân GPIO kết nối v�
 CONFIG_FILE = "app_betea/input/config.txt"
 LOG_FILE = "app_betea/output/history.log"
 VIETNAM_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
+
+log_dir = "app_betea/output"
+os.makedirs(log_dir, exist_ok=True)
 
 # Thiết lập logging
 logging.basicConfig(
