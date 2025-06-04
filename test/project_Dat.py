@@ -2,6 +2,7 @@ import RPi.GPIO as GPIO
 import time
 import threading
 import pytz
+import os
 import logging
 from datetime import datetime, time as datetime_time
 from azure.iot.device import IoTHubDeviceClient, MethodResponse
@@ -15,6 +16,10 @@ TIME_PER_100ML_special = 3
 RELAY_PINS = [15, 18, 16, 20, 21, 23, 24, 25, 8, 7]  # Chân GPIO kết nối với 5 relay
 LOG_FILE = "app_betea/output/history.log"
 VIETNAM_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
+
+# Tạo thư mục lưu log nếu chưa tồn tại
+log_dir = "app_betea/output"
+os.makedirs(log_dir, exist_ok=True)
 
 # Thiết lập logging
 logging.basicConfig(

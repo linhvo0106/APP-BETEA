@@ -1,8 +1,4 @@
-try:
-    import RPi.GPIO as GPIO
-except ModuleNotFoundError:
-    print("⚠️ RPi.GPIO not available, using fake-rpi.")
-    from fake_rpi.RPi import GPIO
+import RPi.GPIO as GPIO
 import paho.mqtt.client as mqtt
 import time
 import threading
