@@ -12,8 +12,8 @@ TIME_PER_100ML = 2.7
 TIME_PER_100ML_special = 3
 
 # Cấu hình chân GPIO cho module relay
-RELAY_PINS = [15, 18, 16, 20, 21, 23, 24, 25, 8, 7]  # Chân GPIO kết nối với 5 relay
-LOG_FILE = "app_betea/output/history.log"
+RELAY_PINS = [15, 18, 16, 20]  # Chân GPIO kết nối với 5 relay
+LOG_FILE = "app_betea/output/pump_history.log"
 VIETNAM_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
 
 # Thiết lập logging
